@@ -320,6 +320,25 @@ button{font:inherit;color:inherit}
   .seal,.hint,.scene-title .names,.sheen{animation:none}
   .js .rv.in{animation:none}
 }
+/* ---------- music button ---------- */
+.music{
+  position:fixed;z-index:95;
+  bottom:calc(env(safe-area-inset-bottom,0px) + 16px);
+  right:calc(max(16px,env(safe-area-inset-right,0px)));
+  width:48px;height:48px;border-radius:50%;border:1px solid rgba(198,162,77,.7);cursor:pointer;
+  background:rgba(248,242,231,.85);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  box-shadow:0 6px 18px rgba(60,45,20,.16);display:grid;place-items:center;color:var(--gold-deep);
+  transition:transform .3s var(--ease),background .3s;
+}
+.music:hover{transform:scale(1.06)}
+.music svg{width:20px;height:20px}
+.music .bars{display:none;gap:2px;align-items:flex-end;height:16px}
+.music .bars i{width:3px;background:var(--gold-deep);border-radius:2px;animation:eq 1s ease-in-out infinite}
+.music .bars i:nth-child(2){animation-delay:.2s}.music .bars i:nth-child(3){animation-delay:.4s}.music .bars i:nth-child(4){animation-delay:.1s}
+@keyframes eq{0%,100%{height:4px}50%{height:16px}}
+.music.on .bars{display:flex}.music.on .note{display:none}
+.music.on{background:var(--gold-light)}
+@media (prefers-reduced-motion:reduce){.music .bars i{animation:none;height:10px}}
 </style>
 </head>
 <body class="sealed" data-lang="tr">
@@ -331,6 +350,12 @@ button{font:inherit;color:inherit}
   <button type="button" id="lang-tr" data-set="tr" aria-pressed="true">TR</button>
   <button type="button" id="lang-en" data-set="en" aria-pressed="false">EN</button>
 </div>
+
+
+<button type="button" class="music" id="music" aria-pressed="false" aria-label="Müzik / Music">
+  <svg class="note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+  <span class="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+</button>
 
 <!-- ============ ENVELOPE ============ -->
 <div id="scene" aria-label="Davetiye zarfı">
@@ -366,8 +391,8 @@ button{font:inherit;color:inherit}
     </div>
 
     <p class="hint">
-      <span class="tr">Zarfı açmak için mühre dokunun</span>
-      <span class="en">Tap the seal to open</span>
+      <span class="tr">Zarfı açmak için mühre dokunun · sesi açın</span>
+      <span class="en">Tap the seal to open · sound on</span>
     </p>
   </div>
 </div>
@@ -622,6 +647,95 @@ button{font:inherit;color:inherit}
     document.getElementById('flaplace').setAttribute('d','M'+in1.join(' ')+' L'+in2.join(' ')+' L'+in3.join(' '));
   })();
 
+
+  /* ---------- music: a soft harp & piano piece generated in the browser ---------- */
+  var music=(function(){
+    var AC=window.AudioContext||window.webkitAudioContext; if(!AC) return null;
+    var ctx=null, master=null, wet=null, playing=false, nextT=0, step=0, timer=null;
+    var BPM=66, beat=60/BPM, eighth=beat/2;
+    // D major: progression I – vi – IV – V, two bars each
+    var chords=[[62,66,69,74],[59,62,66,71],[55,59,62,67],[57,61,64,69]];
+    var melody=[ [74,2],[78,1],[76,1],[74,2],[71,2], [73,2],[74,1],[76,1],[78,3],[0,1],
+                 [79,2],[78,1],[76,1],[74,2],[71,2], [69,2],[71,1],[73,1],[74,3],[0,1] ];
+    var melIdx=0, melWait=0;
+    function hz(m){return 440*Math.pow(2,(m-69)/12);}
+    function impulse(sec,decay){
+      var rate=ctx.sampleRate, len=rate*sec, buf=ctx.createBuffer(2,len,rate);
+      for(var c=0;c<2;c++){ var d=buf.getChannelData(c); for(var i=0;i<len;i++){ d[i]=(Math.random()*2-1)*Math.pow(1-i/len,decay);} }
+      return buf;
+    }
+    function init(){
+      ctx=new AC();
+      master=ctx.createGain(); master.gain.value=0; master.connect(ctx.destination);
+      var conv=ctx.createConvolver(); conv.buffer=impulse(3.2,2.4);
+      wet=ctx.createGain(); wet.gain.value=.55; conv.connect(wet); wet.connect(master);
+      var lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=5200;
+      lp.connect(master); lp.connect(conv);
+      init.bus=lp;
+    }
+    function pluck(m,t,vol,len){ // harp-like
+      var o=ctx.createOscillator(), o2=ctx.createOscillator(), g=ctx.createGain(), f=ctx.createBiquadFilter();
+      o.type='triangle'; o2.type='sine'; o.frequency.value=hz(m); o2.frequency.value=hz(m)*2; 
+      f.type='lowpass'; f.frequency.setValueAtTime(3800,t); f.frequency.exponentialRampToValueAtTime(900,t+len);
+      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vol,t+.008); g.gain.exponentialRampToValueAtTime(.0008,t+len);
+      var g2=ctx.createGain(); g2.gain.value=.18; o2.connect(g2); g2.connect(f);
+      o.connect(f); f.connect(g); g.connect(init.bus);
+      o.start(t); o2.start(t); o.stop(t+len+.05); o2.stop(t+len+.05);
+    }
+    function piano(m,t,vol,len){ // soft melody voice with slow vibrato
+      var o=ctx.createOscillator(), v=ctx.createOscillator(), vg=ctx.createGain(), g=ctx.createGain();
+      o.type='sine'; o.frequency.value=hz(m); v.frequency.value=4.6; vg.gain.value=1.6; v.connect(vg); vg.connect(o.frequency);
+      var h=ctx.createOscillator(), hg=ctx.createGain(); h.type='triangle'; h.frequency.value=hz(m); hg.gain.value=.12;
+      g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(vol,t+.03); g.gain.setTargetAtTime(vol*.55,t+.1,.5); g.gain.setTargetAtTime(0,t+len-.25,.18);
+      o.connect(g); h.connect(hg); hg.connect(g); g.connect(init.bus);
+      o.start(t); v.start(t); h.start(t); o.stop(t+len+.3); v.stop(t+len+.3); h.stop(t+len+.3);
+    }
+    function pad(ch,t,len){
+      ch.forEach(function(m){
+        var o=ctx.createOscillator(), o2=ctx.createOscillator(), g=ctx.createGain();
+        o.type='sine'; o2.type='sine'; o.frequency.value=hz(m-12); o2.frequency.value=hz(m-12)*1.003;
+        g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(.028,t+1.2); g.gain.setTargetAtTime(0,t+len-1,.5);
+        o.connect(g); o2.connect(g); g.connect(init.bus); o.start(t); o2.start(t); o.stop(t+len+1); o2.stop(t+len+1);
+      });
+    }
+    function schedule(){
+      while(nextT < ctx.currentTime+.6){
+        var bar=Math.floor(step/8), ch=chords[Math.floor(bar/2)%4], pos=step%8;
+        if(pos===0 && bar%2===0) pad(ch,nextT,beat*8);
+        // arpeggio pattern over the chord, up then down, with a sparkle an octave up
+        var arp=[0,1,2,3,2,1,3,2][pos], note=ch[arp]; if(pos===3||pos===7) note+=12;
+        pluck(note,nextT,(pos===0?.16:.1)*(1+Math.sin(step*.37)*.15),2.2);
+        if(pos===0 || pos===4){ pluck(ch[0]-12,nextT,.12,3.5); }
+        // melody enters after the first 2 bars
+        if(bar>=2 && pos%2===0){
+          if(melWait<=0){ var n=melody[melIdx%melody.length]; melIdx++; melWait=n[1]; if(n[0]) piano(n[0],nextT,.11,n[1]*beat); }
+          melWait--;
+        }
+        nextT+=eighth; step++;
+      }
+    }
+    function start(){
+      if(!ctx) init();
+      if(ctx.state==='suspended') ctx.resume();
+      if(playing) return;
+      playing=true; nextT=ctx.currentTime+.05; 
+      master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setValueAtTime(master.gain.value,ctx.currentTime);
+      master.gain.linearRampToValueAtTime(.9,ctx.currentTime+2.5);
+      timer=setInterval(schedule,120); schedule();
+    }
+    function stop(){
+      if(!ctx||!playing) return; playing=false; clearInterval(timer);
+      master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setValueAtTime(master.gain.value,ctx.currentTime);
+      master.gain.linearRampToValueAtTime(0,ctx.currentTime+.8);
+    }
+    return {start:start, stop:stop, isPlaying:function(){return playing;}};
+  })();
+  var musicBtn=document.getElementById('music');
+  function syncMusicBtn(){ var on=music&&music.isPlaying(); musicBtn.classList.toggle('on',!!on); musicBtn.setAttribute('aria-pressed',String(!!on)); }
+  if(!music){ musicBtn.hidden=true; }
+  musicBtn.addEventListener('click',function(){ if(!music) return; if(music.isPlaying()) music.stop(); else music.start(); syncMusicBtn(); });
+  document.addEventListener('visibilitychange',function(){ if(document.hidden && music && music.isPlaying()){ music.stop(); syncMusicBtn(); } });
+
   /* ---------- opening sequence ---------- */
   var scene=document.getElementById('scene'), env=document.getElementById('env'),
       seal=document.getElementById('seal'), burst=document.getElementById('burst');
@@ -629,6 +743,7 @@ button{font:inherit;color:inherit}
   function openEnvelope(){
     if(opened) return; opened=true;
     try{ if(navigator.vibrate) navigator.vibrate([12,40,18]); }catch(e){}
+    try{ if(music){ music.start(); syncMusicBtn(); } }catch(e){}
     var t = reduce ? function(f){f();} : null;
     seal.classList.add('press');
     setTimeout(function(){ seal.classList.remove('press'); seal.classList.add('crack'); burst.classList.add('go'); }, reduce?0:220);
